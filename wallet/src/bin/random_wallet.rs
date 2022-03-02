@@ -4,7 +4,7 @@
 use async_std::task::sleep;
 use cape_wallet::backend::CapeBackend;
 use cape_wallet::mocks::*;
-use cape_wallet::testing::create_test_network;
+use cape_wallet::testing::{create_test_network, spawn_eqs};
 use cape_wallet::CapeWallet;
 use jf_cap::keys::UserKeyPair;
 use jf_cap::structs::AssetCode;
@@ -99,9 +99,13 @@ async fn main() {
     // Everyone creates own relayer and EQS, not sure it works without EQS
     let (sender_key, relayer_url, contract_address, mock_eqs) =
         create_test_network(&mut rng, &universal_param).await;
+    // Spawn our own EQS since we have our own relayer and contract connection.
+    // TODO connect to an existing EQS.
+    let (eqs_url, _eqs_dir, _join_eqs) = spawn_eqs(contract_address).await;
     println!("Ledger Created");
     let backend = CapeBackend::new(
         &universal_param,
+        eqs_url,
         relayer_url.clone(),
         contract_address,
         None,

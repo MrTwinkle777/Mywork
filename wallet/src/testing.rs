@@ -8,11 +8,16 @@ use crate::CapeWallet;
 use crate::CapeWalletError;
 use address_book::init_web_server;
 use address_book::wait_for_server;
-use async_std::sync::{Arc, Mutex};
+use async_std::{
+    sync::{Arc, Mutex},
+    task::{sleep, spawn, JoinHandle},
+};
 use cap_rust_sandbox::deploy::EthMiddleware;
 use cap_rust_sandbox::ledger::CapeLedger;
 use cap_rust_sandbox::types::SimpleToken;
+use eqs::{configuration::EQSOptions, run_eqs};
 use ethers::prelude::Address;
+use futures::Future;
 use jf_cap::keys::UserAddress;
 use jf_cap::keys::UserKeyPair;
 use jf_cap::proof::UniversalParam;
@@ -32,7 +37,9 @@ use reef::Ledger;
 use relayer::testing::start_minimal_relayer_for_test;
 use seahorse::testing::await_transaction;
 use seahorse::txn_builder::{TransactionReceipt, TransactionStatus};
+use std::time::Duration;
 use surf::Url;
+use tempdir::TempDir;
 use tide::log::LevelFilter;
 
 lazy_static! {
@@ -47,6 +54,18 @@ pub async fn port() -> u64 {
     let port = *counter;
     *counter += 1;
     port
+}
+
+pub async fn retry<Fut: Future<Output = bool>>(f: impl Fn() -> Fut) {
+    let mut backoff = Duration::from_millis(100);
+    for _ in 0..10 {
+        if f().await {
+            return;
+        }
+        sleep(backoff).await;
+        backoff *= 2;
+    }
+    panic!("retry loop did not complete in {:?}", backoff);
 }
 
 #[allow(clippy::needless_lifetimes)]
@@ -120,6 +139,35 @@ pub async fn create_test_network<'a>(
     let mock_eqs = Arc::new(Mutex::new(mock_eqs));
 
     (sender_key, relayer_url, contract.address(), mock_eqs)
+}
+
+pub async fn spawn_eqs(
+    _contract_address: Address,
+) -> (Url, TempDir, JoinHandle<std::io::Result<()>>) {
+    let dir = TempDir::new("wallet_testing_eqs").unwrap();
+    let eqs_port = port().await;
+    let opt = EQSOptions {
+        web_path: String::new(),
+        api_path: [
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+            std::path::Path::new("../eqs/api/api.toml"),
+        ]
+        .iter()
+        .collect::<std::path::PathBuf>()
+        .as_os_str()
+        .to_str()
+        .unwrap()
+        .to_string(),
+        store_path: format!("{:?}", dir),
+        reset_state_store: true,
+        query_frequency: 500,
+        eqs_port: eqs_port as u16,
+    };
+    let join = spawn(async move { run_eqs(&opt).await });
+    let url = Url::parse(&format!("http://localhost:{}", eqs_port)).unwrap();
+    retry(|| async { surf::connect(url.clone()).send().await.is_ok() }).await;
+
+    (url, dir, join)
 }
 
 #[derive(Debug)]

@@ -1127,6 +1127,7 @@ dependencies = [
  "bincode",
  "cap-rust-sandbox",
  "commit",
+ "eqs",
  "escargot",
  "ethers 0.6.0 (git+https://github.com/gakonst/ethers-rs?branch=master)",
  "futures",
